@@ -1,0 +1,214 @@
+---
+title: "Sentiment Analysis"
+author: "Xiang XU"
+date: "December 16, 2018"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE,fig.align = "centre")
+pacman::p_load(
+  "ggplot2",
+  "knitr",
+  "stringr",
+  "data.table",
+  "gutenbergr",
+  "car",
+  "faraway",
+  "tidytext",
+  "dplyr",
+  "stringr",
+  "tidyr",
+  "readr",
+  "wordcloud2",
+  "sentimentr"
+)
+```
+
+
+## read data
+
+data import and clean
+```{r}
+rm(list = ls())
+
+library(readxl)
+Visits <- read_excel("data/visits_2017.xlsx")
+```
+
+
+
+## word frequency
+Now we will focus on `VisitNotes` variable.
+
+```{r}
+VisitNotes <- Visits %>%
+  select(`VisitNotes`)
+colnames(VisitNotes) <- "text"
+VisitNotes <- as.data.frame(VisitNotes)
+```
+
+
+###Word frequency of unigram(single words)
+
+
+```{r, warning=FALSE, message=FALSE}
+all_singleword_frequency <- VisitNotes %>% 
+  unnest_tokens(word,text) %>%
+  mutate(word = str_extract(word, "[a-z']+")) %>%
+  count( word, sort = TRUE)%>% 
+  filter(!word %in% stop_words$word ,
+         !word %in% "[\\s]+",
+         !word %in% "",
+         !word %in% NA) #%>%
+View(all_singleword_frequency)
+
+#wordcloud of single words
+wordcloud2::wordcloud2(all_singleword_frequency,color = "forestgreen",shape = "circle",size = .5)
+```
+
+###Word frequency of bigram(two words in sequence)
+
+```{r, warning=FALSE, message=FALSE}
+all_bigramword_frequency <- VisitNotes %>%
+  unnest_tokens(word, text, token = "ngrams", n = 2)%>% 
+  separate(word, c("word1", "word2", sep = " ")) %>%
+  filter(!word1 %in% stop_words$word ,
+         !word1 %in% "[\\s]+",
+         !word1 %in% "",
+         !word1 %in% NA) %>%
+  filter(!word2 %in% stop_words$word ,
+         !word2 %in% "[\\s]+",
+         !word2 %in% "",
+         !word2 %in% NA) %>%
+  #reunite them
+  unite(word, word1, word2 ,sep = " ") %>%
+  count( word, sort = TRUE)
+
+View(all_bigramword_frequency)
+
+#wordcloud of bigrams
+wordcloud2::wordcloud2(all_bigramword_frequency,color = "tomato",shape = "circle",size = .4)
+```
+
+###Word frequency of trigram(three words in sequence)
+
+```{r, warning=FALSE, message=FALSE}
+all_trigramword_frequency <- VisitNotes %>%
+  unnest_tokens(word, text, token = "ngrams", n = 3)%>% 
+  separate(word, c("word1", "word2","word3", sep = " ")) %>%
+  filter(!word1 %in% stop_words$word ,
+         !word1 %in% "[\\s]+",
+         !word1 %in% "",
+         !word1 %in% NA) %>%
+  filter(!word2 %in% stop_words$word ,
+         !word2 %in% "[\\s]+",
+         !word2 %in% "",
+         !word2 %in% NA) %>%
+    filter(!word3 %in% stop_words$word ,
+         !word3 %in% "[\\s]+",
+         !word3 %in% "",
+         !word3 %in% NA) %>%
+  #reunite them
+  unite(word, word1, word2,word3 ,sep = " ") %>%
+  #count the cleaned bigram
+  count( word, sort = TRUE)
+View(all_trigramword_frequency)
+
+#wordcloud of trigrams
+wordcloud2::wordcloud2(all_trigramword_frequency ,color = "royalblue",shape = "circle",size = .3)
+
+```
+
+## sentiment score
+```{r}
+#read data
+
+rm(list = ls())
+load("E:/MSSP/Besbees/BestBeesFall2018/Text_Mining/data/Visits_all.Rdata")
+##change accroding to your file
+## you can read csv or excel 
+## Visits <-  read_excel("data/visits.xlsx")
+```
+
+
+Now we have 8 years data: 2011 2012 2013 2014 2015 2016 2017 2018
+
+And you can have a glimpse :each hive have how many notes record in these 8 yrs
+```{r}
+Visits$year <- as.factor(lubridate::year	(Visits$DateVisit))
+#Now we have 8 years data
+## 2011 2012 2013 2014 2015 2016 2017 2018
+
+visitnotes_count <- Visits %>%
+  group_by(zkfHiveID,year) %>%
+  select(zkfHiveID,year,zkpVisitID)%>%
+  transmute(count = n()) %>%
+  arrange(desc(count))  %>%
+  unique()%>%
+  tidyr::spread(key =year, value = count )
+
+kable(head(visitnotes_count,10),caption = "Visit Records num by year for each HIVE")
+```
+
+```{r}
+##!!! fix conflicting words 
+
+Visits$VisitNotes <- Visits$VisitNotes %>% 
+  str_replace("brood","broods") %>%    str_replace( "soapy","soap") %>%
+  str_replace("plot", "plots") %>%    str_replace("plot", "plots") %>% 
+  str_replace("cracks", "opening") %>% str_replace("shallow", "slight") %>%
+  str_replace("caged", "stored")  %>% str_replace("hive alive", "hivealive")
+
+
+
+Visits_element <- tibble::rowid_to_column(Visits, "element_id")
+Visits_sentiment <- sentiment(na.omit(Visits$VisitNotes)) %>%
+                         group_by(element_id) %>% transmute(sentiment_notes = sum(sentiment)) %>%
+                         unique()
+
+
+visitsnotes_sentiment <- Visits_element %>%
+                        inner_join(Visits_sentiment, by =  "element_id")
+
+summary(visitsnotes_sentiment$sentiment_notes);qqnorm(visitsnotes_sentiment$sentiment_notes);
+ggplot(visitsnotes_sentiment, aes(x =sentiment_notes, y =..density..))+
+  geom_density(color= "tomato", fill ="tomato",adjust = 1.5)+
+   #mean
+  geom_vline(xintercept =  mean(visitsnotes_sentiment$sentiment_notes), linetype = "dashed", color = "ivory4", size= 1 ) + 
+  #Q1 Q3
+  geom_vline(xintercept =  quantile(visitsnotes_sentiment$sentiment_notes, probs = c(0.25,0.75)), linetype = "dotted", color = "ivory4", size= 1 ) +
+  ggtitle("Distributions of sentiment scores")
+
+```
+
+###Sentiment scores of each visit
+```{r}
+
+visits_sentiment <- visitsnotes_sentiment %>%
+  group_by(zkfHiveID,year) %>%
+  select(zkfHiveID,year,DateVisit,zkpVisitID,sentiment_notes)
+
+#we randomly sample 7 hives from all 
+samplenote <- sample(visits_sentiment$zkpVisitID,7)
+kable(visits_sentiment%>% filter(zkpVisitID %in% samplenote))
+
+
+```
+
+
+##sentiment trend
+
+```{r,eval=FALSE}
+
+#we radonly sample 4 hives and see their trend based on timeline
+sample <- sample(visits_sentiment$zkfHiveID,4)
+
+visits_sentiment %>% filter(zkfHiveID %in% sample) %>%
+  ggplot() +
+  aes(x = DateVisit, y = sentiment_notes,group = zkfHiveID , color = zkfHiveID ) + 
+  geom_point()+geom_line() +
+  facet_grid(zkfHiveID ~.) +
+  ggtitle("Sentiment Score Time Trend")+ theme(legend.position = "none")
+```
